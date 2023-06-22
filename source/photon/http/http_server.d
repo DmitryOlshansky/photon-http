@@ -32,6 +32,7 @@ abstract class HttpProcessor {
 			buf ~= header.value;
 			buf ~= "\r\n";
 		}
+		buf ~= "\r\n";
 		buf ~= range;
 		sock.send(buf);
 	}
