@@ -67,9 +67,9 @@ abstract class HttpProcessor {
 				}
 				parser.popFront();
 			}
-			onComplete(request);
+			handle(request);
 		}
-			}
+	}
 }
 
 struct HttpHeader {
@@ -254,7 +254,7 @@ unittest
 			assert(_body == cases.front.reqBody, text(_body, " vs ", cases.front.reqBody));
 		}
 
-		override void onComplete(HttpRequest req) {
+		override void handle(HttpRequest req) {
 			respondWith(_body, 200);
 			cases.popFront();
 		}
