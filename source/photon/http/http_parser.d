@@ -117,6 +117,8 @@ struct HttpEvent {
         return "Header("~ header.key.idup ~"," ~ header.value.idup ~")";
       case ParserFields.url:
         return "URL("~ url.idup ~")";
+      case ParserFields.body_:
+        return "Body("~ body_.to!string ~")";
       default:
         return "****";
     }
@@ -150,6 +152,7 @@ struct Parser {
 
   void step() {
     import std.stdio;
+    int length = 0;
     with (HttpState) switch(state) {
       case METHOD:
         with (HttpMethod) 
@@ -209,8 +212,7 @@ struct Parser {
           else {
             event.body_ = cast(ubyte[])buf[pos..$];
             event.tag = ParserFields.body_;
-            state = END;
-            isEmpty = true;
+            state = BODY;
             return;
           }
         }
@@ -230,6 +232,18 @@ struct Parser {
         event.header = hdr;
         state = HEADER_START;
         if (buf[pos] == '\r' && buf[pos+1] == '\n') pos += 2;
+        if (hdr.key.toUpper() == "CONTENT-LENGTH") {
+          import std.conv;
+          length = hdr.value.to!int;
+        }
+        break;
+      case BODY:
+        event.tag = ParserFields.body_;
+        event.body_ = cast(ubyte[])buf[pos..$];
+        pos = buf.length;
+        if (event.body_.length == length) {
+          state = END;
+        }
         break;
       case END:
         isEmpty = true;

@@ -18,8 +18,13 @@ abstract class HttpProcessor {
 		this.sock = sock;
 	}
 
-	void respondWith(string range, int status, HttpHeader[] headers) {
+	void respondWith(const(char)[] range, int status, HttpHeader[] headers) {
 		char[] buf;
+		import std.conv;
+		
+		buf ~= "http/1.1 ";
+		buf ~= status.to!string;
+		buf ~= "\r\n";
 		foreach (header; headers)
 		{
 			buf ~= header.name;
@@ -36,7 +41,7 @@ abstract class HttpProcessor {
 		foreach (el; range){
 			buf ~= cast(char)el;
 		}
-		sock.send(buf);
+		respondWith(buf, status, headers);
 	}
 
     void handle(HttpRequest req);
@@ -241,22 +246,12 @@ unittest
 			this.cases = cases;
 		}
 
-		override void onStart(HttpRequest req) {
-			_body = "";
-			assert(req.method == cases.front.method, text(req.method));
-			assert(req.headers == cases.front.expected, text("Unexpected:", req.headers));
-		}
-
-		override void onChunk(HttpRequest req, const(ubyte)[] chunk) {
-			assert(req.method == cases.front.method, text(req.method));
-			assert(req.headers == cases.front.expected, text("Unexpected:", req.headers));
-			_body ~= cast(string)chunk;
-			assert(_body == cases.front.reqBody, text(_body, " vs ", cases.front.reqBody));
-		}
-
 		override void handle(HttpRequest req) {
-			respondWith(_body, 200);
+			assert(req.method == cases.front.method, text(req.method));
+			assert(req.headers == cases.front.expected, text("Unexpected:", req.headers));
+			respondWith(_body, 200, [ HttpHeader("Host", "host"), HttpHeader("Accept", "*/*"), HttpHeader("Connection", "close"), HttpHeader("Content-Length", "5")]);
 			cases.popFront();
+			_body = "";
 		}
 	}
 
