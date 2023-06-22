@@ -39,7 +39,7 @@ abstract class HttpProcessor {
 		sock.send(buf);
 	}
 
-    void onComplete(HttpRequest req);
+    void handle(HttpRequest req);
 
 	void run() {
 		char[8096] buf;
