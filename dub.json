@@ -1,0 +1,9 @@
+{
+	"authors": [
+		"Dmitry Olshansky"
+	],
+	"copyright": "Copyright © 2023, Dmitry Olshansky",
+	"description": "Http server for Photon or standalone use cases",
+	"license": "Boost",
+	"name": "photon-http"
+}
