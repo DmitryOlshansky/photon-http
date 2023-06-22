@@ -118,7 +118,7 @@ struct HttpEvent {
       case ParserFields.url:
         return "URL("~ url.idup ~")";
       case ParserFields.body_:
-        return "Body("~ body_.to!string ~")";
+        return "Body("~ cast(string)body_ ~")";
       default:
         return "****";
     }
@@ -210,7 +210,8 @@ struct Parser {
           else if (buf[pos] == ':')
             break;
           else {
-            event.body_ = cast(ubyte[])buf[pos..$];
+            event.body_ = cast(ubyte[])buf[pos+2..$];
+            pos = buf.length;
             event.tag = ParserFields.body_;
             state = BODY;
             return;

@@ -24,7 +24,7 @@ abstract class HttpProcessor {
 		
 		buf ~= "http/1.1 ";
 		buf ~= status.to!string;
-		buf ~= "\r\n";
+		buf ~= " OK\r\n";
 		foreach (header; headers)
 		{
 			buf ~= header.name;
@@ -65,6 +65,15 @@ abstract class HttpProcessor {
 					case url:
 						request.uri = parser.front.url;
 						break;
+					case header:
+						request.headers ~= HttpHeader(
+							parser.front.header.key,
+							parser.front.header.value
+						);
+						break;
+					case body_:
+						request.body_ ~= parser.front.body_;
+						break;
 					case version_:
 						request.version_ = parser.front.version_;
 						break;
@@ -86,6 +95,7 @@ struct HttpRequest {
 	HttpMethod method;
 	const(char)[] uri;
 	const(char)[] version_;
+	const(char)[] body_;
 }
 
 shared bool httpServing = true;
@@ -249,7 +259,7 @@ unittest
 		override void handle(HttpRequest req) {
 			assert(req.method == cases.front.method, text(req.method));
 			assert(req.headers == cases.front.expected, text("Unexpected:", req.headers));
-			respondWith(_body, 200, [ HttpHeader("Host", "host"), HttpHeader("Accept", "*/*"), HttpHeader("Connection", "close"), HttpHeader("Content-Length", "5")]);
+			respondWith(_body, 200, []);
 			cases.popFront();
 			_body = "";
 		}
