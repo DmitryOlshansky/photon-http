@@ -67,7 +67,7 @@ abstract class HttpProcessor {
 				}
 				parser.popFront();
 			}
-			onComplete(request);
+			handle(request);
 		}
 			}
 }
