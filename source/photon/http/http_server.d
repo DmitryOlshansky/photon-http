@@ -6,7 +6,7 @@ import std.array, std.range, std.datetime,
 std.exception, std.format, 
 std.algorithm.mutation, std.socket;
 
-import core.stdc.stdlib;
+import core.stdc.stdlib, core.stdc.string;
 import core.thread, core.atomic;
 
 import photon.http.http_parser;
@@ -32,6 +32,10 @@ abstract class HttpProcessor {
 			buf ~= header.value;
 			buf ~= "\r\n";
 		}
+		buf ~= "Content-Length: %d\r\n".format(range.length);
+		auto date = httpDate[0..strlen(cast(const char*)httpDate)];
+		buf ~= cast(const char[])date;
+		buf ~= "\r\n";
 		buf ~= "\r\n";
 		buf ~= range;
 		sock.send(buf);
