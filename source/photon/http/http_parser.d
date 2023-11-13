@@ -1,5 +1,4 @@
-/// Minimalistic low-overhead wrapper for nodejs/http-parser
-/// Used for benchmarks with simple server
+/// Simple HTTP parser
 module photon.http.http_parser;
 
 import std.range.primitives;
@@ -151,7 +150,6 @@ struct Parser {
   }
 
   void step() {
-    import std.stdio;
     int length = 0;
     with (HttpState) switch(state) {
       case METHOD:
@@ -256,7 +254,11 @@ struct Parser {
 
   void clear() {
     buf.length = 0;
+    pos = 0;
     buf.assumeSafeAppend();
+    state = HttpState.METHOD;
+    isEmpty = false;
+    event = HttpEvent.init;
   }
 
   bool empty() const { return isEmpty; }

@@ -3,7 +3,7 @@
 module photon.http.http_server;
 
 import std.array, std.range, std.datetime, 
-std.exception, std.format, 
+std.exception, std.format, std.uni,
 std.algorithm.mutation, std.socket;
 
 import core.stdc.stdlib, core.stdc.string;
@@ -13,6 +13,7 @@ import photon.http.http_parser;
 
 abstract class HttpProcessor {
 	Socket sock;
+	bool connectionClose;
     
 	this(Socket sock) {
 		this.sock = sock;
@@ -22,7 +23,7 @@ abstract class HttpProcessor {
 		char[] buf;
 		import std.conv;
 		
-		buf ~= "http/1.1 ";
+		buf ~= "HTTP/1.1 ";
 		buf ~= status.to!string;
 		buf ~= " OK\r\n";
 		foreach (header; headers)
@@ -32,10 +33,13 @@ abstract class HttpProcessor {
 			buf ~= header.value;
 			buf ~= "\r\n";
 		}
+		buf ~= "Server: photon-http\r\n";
+		auto t = atomicLoad(httpDate);
+		buf ~= cast(const char[])*t;
+		if (connectionClose) {
+			buf ~= "Connection: close\r\n";
+		}
 		buf ~= "Content-Length: %d\r\n".format(range.length);
-		auto date = httpDate[0..strlen(cast(const char*)httpDate)];
-		buf ~= cast(const char[])date;
-		buf ~= "\r\n";
 		buf ~= "\r\n";
 		buf ~= range;
 		sock.send(buf);
@@ -56,13 +60,12 @@ abstract class HttpProcessor {
 		Parser parser;
 		for (;;) {
 			HttpRequest request;
+			connectionClose = false;
 			long size = sock.receive(buf);
-			enforce(size >= 0);
+			if (size == 0) break;
+			enforce(size > 0);
 			parser.put(buf[0..size]);
 			while (!parser.empty) {
-				import std.stdio;
-				
-				writeln(parser.front);
 				with (ParserFields) switch(parser.front.tag) {
 					case method:
 						request.method = cast(HttpMethod)parser.front.method;
@@ -75,6 +78,9 @@ abstract class HttpProcessor {
 							parser.front.header.key,
 							parser.front.header.value
 						);
+						if (sicmp(parser.front.header.key, "connection") == 0) {
+							connectionClose = true;
+						}
 						break;
 					case body_:
 						request.body_ ~= parser.front.body_;
@@ -87,6 +93,7 @@ abstract class HttpProcessor {
 				parser.popFront();
 			}
 			handle(request);
+			parser.clear();
 		}
 	}
 }
@@ -103,13 +110,12 @@ struct HttpRequest {
 	const(char)[] body_;
 }
 
-shared bool httpServing = true;
 shared const(char)[]* httpDate;
-shared Thread httpDateThread;
 
 shared static this(){
-    Appender!(char[])[2] bufs;
-    const(char)[][2] targets;
+	Thread httpDateThread;
+    Appender!(char[])[3] bufs;
+    const(char)[][3] targets;
     {
         auto date = Clock.currTime!(ClockType.coarse)(UTC());
         size_t sz = writeDateHeader(bufs[0], date);
@@ -118,23 +124,18 @@ shared static this(){
     }
     httpDateThread = new Thread({
         size_t cur = 1;
-        while(httpServing){ 
+        for(;;){ 
             bufs[cur].clear();
             auto date = Clock.currTime!(ClockType.coarse)(UTC());
-            auto tmp = bufs[cur];
-            size_t sz = writeDateHeader(bufs[cur], date);
+            writeDateHeader(bufs[cur], date);
             targets[cur] = cast(const)bufs[cur].data;
             atomicStore(httpDate, cast(shared)&targets[cur]);
-            cur = 1 - cur;
+            if (++cur == 3) cur = 0;
             Thread.sleep(250.msecs);
         }
     });
-    (cast()httpDateThread).start(); 
-}
-
-shared static ~this(){
-    atomicStore(httpServing, false);
-    (cast()httpDateThread).join();
+	httpDateThread.isDaemon = true;
+    cast()httpDateThread.start(); 
 }
 
 
@@ -254,7 +255,6 @@ unittest
 
 	static class TestHttpProcessor : HttpProcessor {
 		TestCase[] cases;
-		const(char)[] _body;
 
 		this(Socket sock, TestCase[] cases) {
 			super(sock);
@@ -264,9 +264,8 @@ unittest
 		override void handle(HttpRequest req) {
 			assert(req.method == cases.front.method, text(req.method));
 			assert(req.headers == cases.front.expected, text("Unexpected:", req.headers));
-			respondWith(_body, 200, []);
+			respondWith(req.body_, 200, []);
 			cases.popFront();
-			_body = "";
 		}
 	}
 
@@ -282,7 +281,7 @@ unittest
 	         HttpMethod.GET,
 	         "HELLO",
 	         [ HttpHeader("Host", "host"), HttpHeader("Accept", "*/*"), HttpHeader("Connection", "close"), HttpHeader("Content-Length", "5")],
-	         `HTTP/1.1 200 OK\r\nServer: photon/simple\r\nDate: .* GMT\r\nConnection: close\r\nContent-Length: 5\r\n\r\nHELLO`
+	         `HTTP/1.1 200 OK\r\nServer: photon-http\r\nDate: .* GMT\r\nConnection: close\r\nContent-Length: 5\r\n\r\nHELLO`
          	)
 		],
 		[
@@ -294,7 +293,7 @@ unittest
 	         HttpMethod.POST,
 	         "HI",
 	         [ HttpHeader("Host", "host"), HttpHeader("Accept", "*/*"), HttpHeader("Content-Length", "2")],
-	         `HTTP/1.1 200 OK\r\nServer: photon/simple\r\nDate: .* GMT\r\nContent-Length: 2\r\n\r\nHI`
+	         `HTTP/1.1 200 OK\r\nServer: photon-http\r\nDate: .* GMT\r\nContent-Length: 2\r\n\r\nHI`
          	),
          	TestCase("GET /test3 HTTP/1.1\r\n" ~
 	         "Host: host2\r\n" ~
@@ -304,7 +303,7 @@ unittest
 	         HttpMethod.GET,
 	         "GOODBAY",
 	         [ HttpHeader("Host", "host2"), HttpHeader("Accept", "*/*"), HttpHeader("Content-Length", "7")],
-	         `HTTP/1.1 200 OK\r\nServer: photon/simple\r\nDate: .* GMT\r\nContent-Length: 7\r\n\r\nGOODBAY`
+	         `HTTP/1.1 200 OK\r\nServer: photon-http\r\nDate: .* GMT\r\nContent-Length: 7\r\n\r\nGOODBAY`
          	)
 		]
 	];
@@ -316,19 +315,27 @@ unittest
 		auto t = new Thread({
 			try {
 				serv.run();
-			}
+			} 
 			catch(Throwable t) {
 				stderr.writeln("Server failed: ", t);
 				throw t;
 			}
 		});
 		t.start();
-		foreach(j, tc; series) {
-			pair[0].send(tc.raw);
-			size_t resp = pair[0].receive(buf[]);
-			assert(buf[0..resp].matchFirst(tc.respPat), text("test series:", i, "\ntest case ", j, "\n", buf[0..resp]));
+		try {
+			foreach(j, tc; series) {
+				pair[0].send(tc.raw);
+				size_t resp = pair[0].receive(buf[]);
+				import std.stdio;
+				if (!buf[0..resp].matchFirst(tc.respPat)) {
+					writeln(buf[0..resp]);
+					assert(false, text("test series:", i, "\ntest case ", j, "\n", buf[0..resp]));
+				}
+				
+			}
+		} finally { 
+			pair[0].close();
+			t.join();
 		}
-		pair[0].close();
-		t.join();
 	}
 }
