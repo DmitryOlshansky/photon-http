@@ -19,10 +19,10 @@ As a simple example here is a static hello world HTTP server runing on std.socke
 /+ dub.json:
     {
 	    "name" : "hello",
-        "dependencies": {
-		        "photon": "~>v0.7.2",
-            "photon-http": "~>0.4.5"
-        }
+            "dependencies": {
+		"photon": "~>v0.7.2",
+                "photon-http": "~>0.4.5"
+            }
     }
 +/
 import std.stdio;
@@ -88,7 +88,7 @@ And here is the same but running on threads and std.socket without Photon:
 #!/usr/bin/env dub
 /+ dub.json:
     {
-	    "name" : "hello",
+	"name" : "hello",
         "dependencies": {
             "photon-http": "~>0.4.5"
         }
