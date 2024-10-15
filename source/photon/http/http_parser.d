@@ -3,23 +3,12 @@ module photon.http.http_parser;
 
 import std.range.primitives;
 import std.ascii, std.string, std.exception;
+import glow.xbuf;
 
 enum HTTP_REQUEST = 1;
 enum HTTP_RESPONSE = 2;
 enum HTTP_BOTH = 3;
 enum HTTTP_MAX_HEADER_SIZE = (80*1024);
-
-/* Flag values for http_parser.flags field */
-enum flags
-  { F_CHUNKED               = 1 << 0
-  , F_CONNECTION_KEEP_ALIVE = 1 << 1
-  , F_CONNECTION_CLOSE      = 1 << 2
-  , F_CONNECTION_UPGRADE    = 1 << 3
-  , F_TRAILING              = 1 << 4
-  , F_UPGRADE               = 1 << 5
-  , F_SKIPBODY              = 1 << 6
-  , F_CONTENTLENGTH         = 1 << 7
-  };
 
 public enum HttpParserType: uint {
 	request = 0,
@@ -72,56 +61,10 @@ public enum HttpMethod: uint {
 	SOURCE = 33,
 }
 
-enum ParserFields {
-  body_,
-  method,
-  url,
-  status,
-  port,
-  header,
-  query,
-  version_,
-  fragment,
-  userinfo
-}
-
 struct Header
 {
   char[] key;
   char[] value;
-}
-
-struct HttpEvent {
-  ParserFields tag;
-  union {
-    ubyte[] body_;
-    int method;
-    char[] url;
-    int status;
-    int port;
-    Header header;
-    char[] query;
-    char[] fragment;
-    char[] userinfo;
-    char[] version_;
-  }
-  string toString() {
-    import std.conv;
-    switch(tag) {
-      case ParserFields.version_: 
-        return "Version(" ~ version_.idup ~ ")";
-      case ParserFields.method:
-        return "Method("~ method.to!string ~")";
-      case ParserFields.header:
-        return "Header("~ header.key.idup ~"," ~ header.value.idup ~")";
-      case ParserFields.url:
-        return "URL("~ url.idup ~")";
-      case ParserFields.body_:
-        return "Body("~ cast(string)body_ ~")";
-      default:
-        return "****";
-    }
-  }
 }
 
 enum HttpState {
@@ -129,15 +72,26 @@ enum HttpState {
   URL = 1,
   VERSION = 2,
   HEADER_START = 3,
-  BODY = 4,
-  END = 5
+  HEADER_VALUE_START = 4,
+  BODY = 5,
+  END = 6,
+  ERROR = 7
 }
 
 struct Parser {
   char[] buf;
   size_t pos;
-  HttpEvent event;
-  bool isEmpty = false;
+  ubyte[] body_;
+  int method;
+  char[] url;
+  int status;
+  int port;
+  Header[] headers;
+  char[] query;
+  char[] fragment;
+  char[] userinfo;
+  char[] version_;
+  const(char)[] error;
   HttpState state;
 
   void put(char[] bite) {
@@ -149,28 +103,43 @@ struct Parser {
     while (buf[pos].isWhite()) pos++;
   }
 
+  bool hasWord(size_t pos, XBuf buf, const(char)[] word) {
+    return pos + word.length < buf.length && cast(const(char)[])(buf[pos..pos+word.length]).toUpper() == word;
+  }
+
+  enum MethodState {
+    SEEN_G,
+    SEEN_GE,
+    SEEN_GET,
+  }
+
+  int methodState(ref XBuf xbuf, size_t pos, int state, )
+
   void step() {
     int length = 0;
     with (HttpState) switch(state) {
       case METHOD:
-        with (HttpMethod) 
-          if (buf[pos..pos+3].toUpper() == "GET") {
-            event.method = GET;
+        with (HttpMethod) {
+          if (hasWord(pos, buf, "GET")) {
+            method = GET;
             pos += 3;
           } 
-          else if (buf[pos..pos+3].toUpper() == "PUT") {
+          else if(hasWord(pos, buf, "PUT")) {
             event.method = PUT;
             pos += 3;
           }
-          else if (buf[pos..pos+4].toUpper() == "POST") {
-            event.method = POST;
+          else if (hasWord(pos, buf, "POST")) {
+            method = POST;
             pos += 4;
           }
-          else if (buf[pos..pos+6].toUpper() == "DELETE") {
-            event.method = DELETE;
+          else if (hasWord(pos, buf, "DELETE")) {
+            method = DELETE;
             pos += 6;
           }
-        event.tag = ParserFields.method;
+          else if (buf.length - pos > ) {
+            break;
+          }
+        }
         state = HttpState.URL;
         break;
       case URL:
@@ -251,26 +220,4 @@ struct Parser {
         assert(false);
     }
   }
-
-  void clear() {
-    buf.length = 0;
-    pos = 0;
-    buf.assumeSafeAppend();
-    state = HttpState.METHOD;
-    isEmpty = false;
-    event = HttpEvent.init;
-  }
-
-  bool empty() const { return isEmpty; }
-
-  void popFront() {
-    step();
-  }
-
-  HttpEvent front() {
-    return event;
-  }
 }
-
-static assert(isInputRange!Parser);
-static assert(isOutputRange!(Parser, char[]));

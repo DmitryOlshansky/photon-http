@@ -2,6 +2,9 @@
 	"authors": [
 		"Dmitry Olshansky"
 	],
+	"dependencies": {
+		"xbuf" : "0.1.1"
+	},
 	"copyright": "Copyright © 2023, Dmitry Olshansky",
 	"description": "Http server for Photon or standalone use cases",
 	"license": "Boost",
