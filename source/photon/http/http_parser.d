@@ -213,7 +213,7 @@ private:
         p = skipWs(pos);
         size_t start = p;
         while (p < buf.length) {
-          if (buf[p] == '*' || buf[p] == '/' || buf[p] == ':' || buf[p] == '.' || buf[p].isAlpha() || buf[p].isDigit())
+          if (buf[p] != '\r' && buf[p] != '\n')
             p++;
           else {
             size_t end = p;
