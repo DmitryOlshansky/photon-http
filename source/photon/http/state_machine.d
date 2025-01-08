@@ -1,4 +1,4 @@
-module phton.http.state_machine;
+module photon.http.state_machine;
 
 public enum HttpMethod: uint {
 	DELETE = 0,
@@ -128,6 +128,7 @@ struct Builder {
 void genCodeForState(T)(TrieEntry!T* node, ref Builder builder) {
     import std.format, std.ascii;
     if (node.final_) {
+        builder.put("L_case%d:".format(node.id));
         builder.put("case %s:".format(node.id));
         builder.incIndent();
         builder.put("pos = p;");
@@ -136,6 +137,7 @@ void genCodeForState(T)(TrieEntry!T* node, ref Builder builder) {
         builder.put("return 1;");
         builder.decIndent();
     } else {
+        builder.put("L_case%d:".format(node.id));
         builder.put("case %s:".format(node.id));
         builder.incIndent();
         builder.put(`if (p == buf.length) {`);
@@ -152,7 +154,7 @@ void genCodeForState(T)(TrieEntry!T* node, ref Builder builder) {
                 builder.incIndent();
                 builder.put(`p++;`);
                 builder.put(`s = %s;`.format(n.id));
-                builder.put(`goto case %d;`.format(n.id));
+                builder.put(`goto L_case%d;`.format(n.id));
                 builder.put(`break;`);
                 builder.decIndent();
             }
@@ -177,7 +179,6 @@ auto generateStateMachine(alias enumeration)(string functionName) {
         add(root, m, mixin(enumeration.stringof~"."~m));
     }
     finalize(root);
-    result.put(`import method;`);
     result.put(`int `~functionName~`(Buf)(ref Buf buf, ref size_t pos, ref int state, out `~enumeration.stringof~` e) {`);
     result.incIndent();
     result.put(`size_t p = pos;`);
@@ -193,6 +194,12 @@ auto generateStateMachine(alias enumeration)(string functionName) {
         }
     }
     recurse(root);
+    result.put("default:");
+    result.incIndent();
+    result.put("state = s;");
+    result.put("pos = p;");
+    result.put("return -1;");
+    result.decIndent();
     result.decIndent();
     result.put(`}`);
     result.decIndent();
@@ -201,41 +208,4 @@ auto generateStateMachine(alias enumeration)(string functionName) {
 }
 
 enum m = generateStateMachine!HttpMethod("parseHttpMethod");
-
-void main() {
-    import std.stdio;
-    writeln(m);
-}
-
-/+
-int parse(Buf)(ref Buf buf, ref size_t pos, ref int state, out HttpMethod method) {
-    size_t p = pos;
-    int s = state;
-    switch(s) {
-    case some_state:
-        if (p == buf.length) {
-            state = s;
-            pos = p;
-            return 0;
-        }
-        switch(buf[p]) {
-            case 'a','A':
-                p++;
-                s = next_state;
-                break;
-            default:
-                pos = p;
-                state = -1;
-                return -1;
-        }
-        break;
-    case final_state:
-        pos = p;
-        state = s;
-        method = final_method;
-        return 1;
-    }
-    case -1:
-        return -1;
-}
-+/
+mixin(m);

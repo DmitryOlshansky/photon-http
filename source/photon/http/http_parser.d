@@ -3,12 +3,14 @@ module photon.http.http_parser;
 
 import std.range.primitives;
 import std.ascii, std.string, std.exception;
+import photon.http.state_machine;
+
 import glow.xbuf;
 
 enum HTTP_REQUEST = 1;
 enum HTTP_RESPONSE = 2;
 enum HTTP_BOTH = 3;
-enum HTTTP_MAX_HEADER_SIZE = (80*1024);
+enum HTTP_MAX_HEADER_SIZE = (80*1024);
 
 public enum HttpParserType: uint {
 	request = 0,
@@ -16,208 +18,244 @@ public enum HttpParserType: uint {
 	both = 2
 }
 
-public enum HttpMethod: uint {
-	DELETE = 0,
-	GET = 1,
-	HEAD = 2,
-	POST = 3,
-	PUT = 4,
-	/* pathological */
-	CONNECT = 5,
-	OPTIONS = 6,
-	TRACE = 7,
-	/* WebDAV */
-	COPY = 8,
-	LOCK = 9,
-	MKCOL = 10,
-	MOVE = 11,
-	PROPFIND = 12,
-	PROPPATCH = 13,
-	SEARCH = 14,
-	UNLOCK = 15,
-	BIND = 16,
-	REBIND = 17,
-	UNBIND = 18,
-	ACL = 19,
-	/* subversion */
-	REPORT = 20,
-	MKACTIVITY = 21,
-	CHECKOUT = 22,
-	MERGE = 23,
-	/* upnp */
-	MSEARCH = 24,
-	NOTIFY = 25,
-	SUBSCRIBE = 26,
-	UNSUBSCRIBE = 27,
-	/* RFC-5789 */
-	PATCH = 28,
-	PURGE = 29,
-	/* CalDAV */
-	MKCALENDAR = 30,
-	/* RFC-2068, section 19.6.1.2 */
-	LINK = 31,
-	UNLINK = 32,
-	/* icecast */
-	SOURCE = 33,
-}
-
-struct Header
+struct HttpHeader
 {
-  char[] key;
-  char[] value;
+  const(char)[] key;
+  const(char)[] value;
 }
 
-enum HttpState {
-  METHOD = 0,
-  URL = 1,
-  VERSION = 2,
-  HEADER_START = 3,
-  HEADER_VALUE_START = 4,
-  BODY = 5,
-  END = 6,
-  ERROR = 7
+struct HttpRequest {
+	HttpHeader[] headers;
+	HttpMethod method;
+	const(char)[] uri;
+	const(char)[] version_;
+	const(ubyte)[] body_;
+}
+
+enum HttpState : int {
+  METHOD = 170, // include all up to 170
+  URL = 171,
+  VERSION = 172,
+  HEADER_START = 173,
+  HEADER_VALUE_START = 174,
+  BODY = 175,
+  END = 176,
+  ERROR = -1
 }
 
 struct Parser {
-  char[] buf;
+private:
+  XBuf buf;
   size_t pos;
-  ubyte[] body_;
-  int method;
+  int state;
+  HttpMethod method;
   char[] url;
-  int status;
-  int port;
-  Header[] headers;
-  char[] query;
-  char[] fragment;
-  char[] userinfo;
+  int length;
+  HttpHeader[] headers;
+  HttpHeader header;
   char[] version_;
-  const(char)[] error;
-  HttpState state;
-
-  void put(char[] bite) {
-    buf ~= bite;
-    step();
+  ubyte[] body_;
+  public bool connectionClose;
+  public string error;
+  
+  public this(XBuf buf) {
+    import std.algorithm.mutation;
+    this.buf = move(buf);
   }
 
-  void skipWs() {
-    while (buf[pos].isWhite()) pos++;
+  size_t skipWs(size_t p) {
+    while (p < buf.length && buf[p].isWhite()) p++;
+    return p;
   }
 
-  bool hasWord(size_t pos, XBuf buf, const(char)[] word) {
-    return pos + word.length < buf.length && cast(const(char)[])(buf[pos..pos+word.length]).toUpper() == word;
+  size_t skipRN(size_t p) {
+    while (p < buf.length) {
+      if (buf[p] == '\r') {
+        p++;
+        if (p == buf.length) {
+          return 0;
+        }
+        if (p == '\n') {
+          return p+1;
+        }
+      }
+      else if(buf[p] == '\n') {
+        return p + 1;
+      }
+      else if(buf[p].isWhite()) {
+        p++;
+      } else {
+        return size_t.max;
+      }
+    }
+    return 0;
   }
 
-  enum MethodState {
-    SEEN_G,
-    SEEN_GE,
-    SEEN_GET,
+  void reset() {
+    state = 0;
+    buf.compact(pos);
+    pos = 0;
+    url = null;
+    header = HttpHeader.init;
+    headers.length = 0;
+    headers.assumeSafeAppend();
+    method = HttpMethod.init;
+    version_ = null;
+    error = null;
+    connectionClose = false;
   }
 
-  int methodState(ref XBuf xbuf, size_t pos, int state, )
+  public int parse(ref HttpRequest req) {
+    reset();
+    for (;;) {
+      int result = step();
+      if (result == -1) {
+        return result;
+      }
+      else if(result == 0) {
+        result = buf.load();
+        if (result == 0 && state != 0) {
+          error = "Unexpected end of input";
+          return -1;
+        }
+        if (result < 0) return result;
+        if (result == 0) return 0;
+      }
+      else {
+        req.body_ = body_;
+        req.method = method;
+        req.uri = url;
+        req.headers = headers;
+        req.body_ = body_;
+        return 1;
+      }
+    }
+  }
 
-  void step() {
-    int length = 0;
+  int step() {
+    size_t p = pos;
     with (HttpState) switch(state) {
-      case METHOD:
-        with (HttpMethod) {
-          if (hasWord(pos, buf, "GET")) {
-            method = GET;
-            pos += 3;
-          } 
-          else if(hasWord(pos, buf, "PUT")) {
-            event.method = PUT;
-            pos += 3;
-          }
-          else if (hasWord(pos, buf, "POST")) {
-            method = POST;
-            pos += 4;
-          }
-          else if (hasWord(pos, buf, "DELETE")) {
-            method = DELETE;
-            pos += 6;
-          }
-          else if (buf.length - pos > ) {
-            break;
-          }
+      case 0: .. case METHOD:
+        parseHttpMethod(buf, p, state, method);
+        pos = p;
+        if (state < 0) {
+          error = "Wrong http method";
+          return -1;
+        }
+        if (state == 0) {
+          return 0;
         }
         state = HttpState.URL;
-        break;
+        goto case URL;
       case URL:
-        skipWs();
-        auto start = pos;
-        while (pos < buf.length) {
-          if (buf[pos] == '/' || buf[pos].isAlpha() || buf[pos].isDigit())
-            pos++;
+        p = skipWs(pos);
+        auto start = p;
+        while (p < buf.length) {
+          if (buf[p] == '/' || buf[p] == '-' || buf[p] == '%' || buf[p].isAlpha() || buf[p].isDigit())
+            p++;
           else
             break;
         }
-        event.tag = ParserFields.url;
-        event.url = buf[start..pos];
-        state = HttpState.VERSION;
-        break;
+        if (p == buf.length) {
+          return 0;
+        }
+        pos = p;
+        url = cast(char[])buf[start..pos];
+        state = VERSION;
+        goto case VERSION;
       case VERSION:
-        skipWs();
-        auto start = pos;
-        while (pos < buf.length) {
-          if (buf[pos] == '.' || buf[pos] == '/' || buf[pos].isAlpha() || buf[pos].isDigit())
-            pos++;
+        import std.stdio;
+        p = skipWs(pos);
+        auto start = p;
+        while (p < buf.length) {
+          if (buf[p] == '.' || buf[p] == '/' || buf[p].isAlpha() || buf[p].isDigit())
+            p++;
           else
             break;
         }
-        event.tag = ParserFields.version_;
-        event.version_ = buf[start..pos];
-        state = HttpState.HEADER_START;
-        skipWs();
-        break;
+        if (p == buf.length) return 0;
+        p = skipRN(p);
+        if (p == 0) return 0;
+        if (p == size_t.max) {
+          error = "Expected \\r\\n after VERSION";
+          return -1;
+        }
+        pos = p;
+        version_ = cast(char[])buf[start..pos];
+        state = HEADER_START;
+        goto case HEADER_START;
       case HEADER_START:
         auto start = pos;
-        while (pos < buf.length) {
-          if (buf[pos] == '-' || buf[pos].isAlpha() || buf[pos].isDigit())
-            pos++;
-          else if (buf[pos] == ':')
+        p = pos;
+        while (p < buf.length) {
+          if (buf[p] == '-' || buf[p].isAlpha() || buf[p].isDigit())
+            p++;
+          else if (buf[p] == ':')
             break;
           else {
-            event.body_ = cast(ubyte[])buf[pos+2..$];
-            pos = buf.length;
-            event.tag = ParserFields.body_;
+            p = skipRN(p);
+            if (p == 0) return 0;
+            if (p == size_t.max) {
+              error = "Expected \\r\\n terminating headers list";
+              return -1;
+            }
+            pos = p;
             state = BODY;
-            return;
+            goto case BODY;
           }
         }
-        Header hdr;
-        event.tag = ParserFields.header;
-        hdr.key = buf[start..pos];
-        pos++;
-        skipWs();
-        start = pos;
-        while (pos < buf.length) {
-          if (buf[pos] == '*' || buf[pos] == '/' || buf[pos] == ':' || buf[pos] == '.' || buf[pos].isAlpha() || buf[pos].isDigit())
-            pos++;
-          else
-            break;
+        if (p == buf.length) return 0;
+        header.key = cast(char[])buf[start..p];
+        p++;
+        pos = p;
+        goto case HEADER_VALUE_START;
+      case HEADER_VALUE_START:
+        p = skipWs(pos);
+        size_t start = p;
+        while (p < buf.length) {
+          if (buf[p] == '*' || buf[p] == '/' || buf[p] == ':' || buf[p] == '.' || buf[p].isAlpha() || buf[p].isDigit())
+            p++;
+          else {
+            size_t end = p;
+            p = skipRN(p);
+            if (p == 0) {
+              return 0;
+            }
+            if (p == size_t.max) {
+              error = "Expected \\r\\n terminating header value";
+              return -1;
+            }
+            header.value = cast(char[])buf[start..end];
+            headers ~= header;
+            state = HEADER_START;
+            pos = p;
+            import std.uni;
+            if (sicmp(header.key, "CONTENT-LENGTH") == 0) {
+              import std.conv;
+              length = header.value.to!int;
+            }
+            else if(sicmp(header.key, "CONNECTION") == 0) {
+              if (sicmp(header.value, "CLOSE") == 0) {
+                connectionClose = true;
+              }
+            }
+            goto case HEADER_START;
+          }
         }
-        hdr.value = buf[start..pos];
-        event.header = hdr;
-        state = HEADER_START;
-        if (buf[pos] == '\r' && buf[pos+1] == '\n') pos += 2;
-        if (hdr.key.toUpper() == "CONTENT-LENGTH") {
-          import std.conv;
-          length = hdr.value.to!int;
-        }
-        break;
+        return 0;
       case BODY:
-        event.tag = ParserFields.body_;
-        event.body_ = cast(ubyte[])buf[pos..$];
-        pos = buf.length;
-        if (event.body_.length == length) {
+        if (buf.length - pos >= length) {
+          body_ = buf[pos..pos+length];
+          pos = pos + length;
           state = END;
+          goto case END;
         }
-        break;
+        return 0;
       case END:
-        isEmpty = true;
-        break;
+        return 1;
       default:
         assert(false);
     }
+    assert(false);
   }
 }

@@ -6,10 +6,11 @@ import std.array, std.range, std.datetime,
 std.exception, std.format, std.uni,
 std.algorithm.mutation, std.socket;
 
-import core.stdc.stdlib, core.stdc.string;
+import core.stdc.stdlib, core.stdc.string, core.stdc.errno;
 import core.thread, core.atomic;
 
-import photon.http.http_parser;
+import photon.http.state_machine, photon.http.http_parser;
+import glow.xbuf;
 
 abstract class HttpProcessor {
 	Socket sock;
@@ -28,7 +29,7 @@ abstract class HttpProcessor {
 		buf ~= " OK\r\n";
 		foreach (header; headers)
 		{
-			buf ~= header.name;
+			buf ~= header.key;
 			buf ~= ": ";
 			buf ~= header.value;
 			buf ~= "\r\n";
@@ -55,59 +56,33 @@ abstract class HttpProcessor {
 
     void handle(HttpRequest req);
 
-	void run() {
-		char[8096] buf;
-		Parser parser;
-		for (;;) {
-			HttpRequest request;
-			connectionClose = false;
-			long size = sock.receive(buf);
-			if (size == 0) break;
-			enforce(size > 0);
-			parser.put(buf[0..size]);
-			while (!parser.empty) {
-				with (ParserFields) switch(parser.front.tag) {
-					case method:
-						request.method = cast(HttpMethod)parser.front.method;
-						break;
-					case url:
-						request.uri = parser.front.url;
-						break;
-					case header:
-						request.headers ~= HttpHeader(
-							parser.front.header.key,
-							parser.front.header.value
-						);
-						if (sicmp(parser.front.header.key, "connection") == 0) {
-							connectionClose = true;
-						}
-						break;
-					case body_:
-						request.body_ ~= parser.front.body_;
-						break;
-					case version_:
-						request.version_ = parser.front.version_;
-						break;
-					default:
-				}
-				parser.popFront();
-			}
-			handle(request);
-			parser.clear();
+	int read(ubyte[] s) nothrow {
+		try {
+			return cast(int)sock.receive(s);
+		} catch(Throwable e) {
+			assert(false);
 		}
 	}
-}
 
-struct HttpHeader {
-	const(char)[] name, value;
-}
-
-struct HttpRequest {
-	HttpHeader[] headers;
-	HttpMethod method;
-	const(char)[] uri;
-	const(char)[] version_;
-	const(char)[] body_;
+	void run() {
+		XBuf buf = XBuf(8096, 1024, &this.read);
+		Parser parser = Parser(move(buf));
+		for (;;) {
+			HttpRequest request;
+			int r = parser.parse(request);
+			connectionClose = parser.connectionClose;
+			if (r == 0) break;
+			else if (r < 0) {
+				if (parser.error.ptr) {
+					throw new Exception("Failed during http parsing: %s".format(parser.error));
+				}
+				auto zstr = strerror(errno);
+				throw new Exception("I/O error %s".format(zstr[0..strlen(zstr)]));
+			}
+			handle(request);
+			if (connectionClose) break;
+		}
+	}
 }
 
 shared const(char)[]* httpDate;
@@ -264,7 +239,7 @@ unittest
 		override void handle(HttpRequest req) {
 			assert(req.method == cases.front.method, text(req.method));
 			assert(req.headers == cases.front.expected, text("Unexpected:", req.headers));
-			respondWith(req.body_, 200, []);
+			respondWith(cast(char[])req.body_, 200, []);
 			cases.popFront();
 		}
 	}
