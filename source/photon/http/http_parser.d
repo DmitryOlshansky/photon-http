@@ -75,7 +75,7 @@ private:
         if (p == buf.length) {
           return 0;
         }
-        if (p == '\n') {
+        if (buf[p] == '\n') {
           return p+1;
         }
       }

@@ -12,17 +12,17 @@ dub build -b release
 ```
 ## Example
 
-As a simple example here is a static hello world HTTP server runing on std.socket/photon:
+As a simple example here is a static hello world HTTP server running on std.socket/photon:
 
 ```d
 #!/usr/bin/env dub
 /+ dub.json:
     {
 	    "name" : "hello",
-            "dependencies": {
-		"photon": "~>v0.7.2",
-                "photon-http": "~>0.4.5"
-            }
+        "dependencies": {
+            "photon": "~>0.10.2",
+            "photon-http": "~>0.5.1"
+        }
     }
 +/
 import std.stdio;
