@@ -78,6 +78,8 @@ private:
         if (buf[p] == '\n') {
           return p+1;
         }
+        // If we found \r but next char is not \n, it's an error
+        return size_t.max;
       }
       else if(buf[p] == '\n') {
         return p + 1;
@@ -151,7 +153,9 @@ private:
         p = skipWs(pos);
         auto start = p;
         while (p < buf.length) {
-          if (buf[p] == '/' || buf[p] == '-' || buf[p] == '%' || buf[p].isAlpha() || buf[p].isDigit())
+          if (buf[p] == '/' || buf[p] == '-' || buf[p] == '%' || buf[p] == '.' || buf[p] == '_' || 
+              buf[p] == '~' || buf[p] == '?' || buf[p] == '&' || buf[p] == '=' || buf[p] == ':' ||
+              buf[p] == '#' || buf[p] == '+' || buf[p].isAlpha() || buf[p].isDigit())
             p++;
           else
             break;
@@ -164,7 +168,6 @@ private:
         state = VERSION;
         goto case VERSION;
       case VERSION:
-        import std.stdio;
         p = skipWs(pos);
         auto start = p;
         while (p < buf.length) {
