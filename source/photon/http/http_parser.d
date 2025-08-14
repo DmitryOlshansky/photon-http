@@ -2,7 +2,7 @@
 module photon.http.http_parser;
 
 import std.range.primitives;
-import std.ascii, std.string, std.exception;
+import std.ascii, std.array, std.string, std.exception;
 import photon.http.state_machine;
 
 import glow.xbuf;
@@ -51,7 +51,7 @@ private:
   HttpMethod method;
   char[] url;
   int length;
-  HttpHeader[] headers;
+  Appender!(HttpHeader[]) headers;
   HttpHeader header;
   char[] version_;
   ubyte[] body_;
@@ -99,8 +99,7 @@ private:
     pos = 0;
     url = null;
     header = HttpHeader.init;
-    headers.length = 0;
-    headers.assumeSafeAppend();
+    headers.clear();
     method = HttpMethod.init;
     version_ = null;
     error = null;
@@ -127,7 +126,7 @@ private:
         req.body_ = body_;
         req.method = method;
         req.uri = url;
-        req.headers = headers;
+        req.headers = headers[];
         req.body_ = body_;
         return 1;
       }

@@ -14,25 +14,20 @@ import glow.xbuf;
 
 abstract class HttpProcessor {
 	Socket sock;
+	Appender!(char[]) buf;
 	bool connectionClose;
     
 	this(Socket sock) {
 		this.sock = sock;
+		buf = appender!(char[])();
 	}
 
 	void respondWith(const(char)[] range, int status, HttpHeader[] headers) {
-		char[] buf;
-		import std.conv;
-		
-		buf ~= "HTTP/1.1 ";
-		buf ~= status.to!string;
-		buf ~= " OK\r\n";
+		buf.clear();
+		buf.formattedWrite("HTTP/1.1 %d OK\r\n", status);
 		foreach (header; headers)
 		{
-			buf ~= header.key;
-			buf ~= ": ";
-			buf ~= header.value;
-			buf ~= "\r\n";
+			buf.formattedWrite("%s: %s\r\n", header.key, header.value);
 		}
 		buf ~= "Server: photon-http\r\n";
 		auto t = atomicLoad(httpDate);
@@ -40,10 +35,10 @@ abstract class HttpProcessor {
 		if (connectionClose) {
 			buf ~= "Connection: close\r\n";
 		}
-		buf ~= "Content-Length: %d\r\n".format(range.length);
+		buf.formattedWrite("Content-Length: %d\r\n", range.length);
 		buf ~= "\r\n";
 		buf ~= range;
-		sock.send(buf);
+		sock.send(buf.data);
 	}
 
 	void respondWith(InputRange!dchar range, int status, HttpHeader[] headers) {
