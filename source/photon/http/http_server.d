@@ -12,6 +12,17 @@ import core.thread, core.atomic, core.time;
 import photon.http.state_machine, photon.http.http_parser;
 import glow.xbuf;
 
+void putInt(Output)(ref Output sink, long value) {
+	immutable table = "0123456789";
+	char[16] buf=void;
+	size_t i = 16;
+	do {
+		buf[--i] = table[value % 10];
+		value /= 10;
+	} while(value);
+	sink.put(buf[i..$]);
+}
+
 abstract class HttpProcessor {
 	Socket sock;
 	Appender!(char[]) output;
@@ -19,15 +30,22 @@ abstract class HttpProcessor {
     
 	this(Socket sock) {
 		this.sock = sock;
-		sock.setOption(SocketOptionLevel.TCP, SocketOption.TCP_NODELAY, true);
+		try {
+			sock.setOption(SocketOptionLevel.TCP, SocketOption.TCP_NODELAY, true);
+		} catch(Exception e) { } // not tcp socket
 		output = appender!(char[])();
 	}
 
 	void respondWith(const(char)[] range, int status, HttpHeader[] headers) {
-		output.formattedWrite("HTTP/1.1 %d OK\r\n", status);
+		output ~= "HTTP/1.1 ";
+		putInt(output, status);
+		output ~= " OK\r\n";
 		foreach (header; headers)
 		{
-			output.formattedWrite("%s: %s\r\n", header.key, header.value);
+			output ~= header.key;
+			output ~= ": ";
+			output ~= header.value;
+			output ~= "\r\n";
 		}
 		output ~= "Server: photon-http\r\n";
 		auto t = atomicLoad(httpDate);
@@ -35,7 +53,9 @@ abstract class HttpProcessor {
 		if (connectionClose) {
 			output ~= "Connection: close\r\n";
 		}
-		output.formattedWrite("Content-Length: %d\r\n", range.length);
+		output ~= "Content-Length: ";
+		putInt(output, range.length);
+		output ~= "\r\n";
 		output ~= "\r\n";
 		output ~= range;
 		if (output.length > 8096) flush();
