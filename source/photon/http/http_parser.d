@@ -43,6 +43,25 @@ enum HttpState : int {
   ERROR = -1
 }
 
+immutable toUpper = () {
+  char[256] table;
+  foreach (i; 0..table.length) {
+    table[i] = std.ascii.toUpper(cast(char)i);
+  }
+  return table;
+}();
+
+// assumes b is UPPER CASE already
+bool caselessEqual(const(char)[] a, const(char)[] b) {
+    if (a.length != b.length) return false;
+    for (size_t i = 0; i < a.length; i++) {
+      if (a[i] != b[i] && toUpper[a[i]] != b[i]) {
+        return false;
+      }
+    }
+    return true;
+}
+
 struct Parser {
 private:
   XBuf buf;
@@ -234,12 +253,12 @@ private:
             state = HEADER_START;
             pos = p;
             import std.uni;
-            if (sicmp(header.key, "CONTENT-LENGTH") == 0) {
+            if (caselessEqual(header.key, "CONTENT-LENGTH")) {
               import std.conv;
               length = header.value.to!int;
             }
-            else if(sicmp(header.key, "CONNECTION") == 0) {
-              if (sicmp(header.value, "CLOSE") == 0) {
+            else if(caselessEqual(header.key, "CONNECTION")) {
+              if (caselessEqual(header.value, "CLOSE")) {
                 connectionClose = true;
               }
             }
