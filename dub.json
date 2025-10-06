@@ -3,7 +3,7 @@
 		"Dmitry Olshansky"
 	],
 	"dependencies": {
-		"xbuf" : "0.1.5"
+		"xbuf" : "~>0.1.6"
 	},
 	"copyright": "Copyright © 2023, Dmitry Olshansky",
 	"description": "Http server for Photon or standalone use cases",
