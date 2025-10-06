@@ -7,46 +7,51 @@ std.exception, std.format, std.uni,
 std.algorithm.mutation, std.socket;
 
 import core.stdc.stdlib, core.stdc.string, core.stdc.errno;
-import core.thread, core.atomic;
+import core.thread, core.atomic, core.time;
 
 import photon.http.state_machine, photon.http.http_parser;
 import glow.xbuf;
 
 abstract class HttpProcessor {
 	Socket sock;
-	Appender!(char[]) buf;
+	Appender!(char[]) output;
 	bool connectionClose;
     
 	this(Socket sock) {
 		this.sock = sock;
-		buf = appender!(char[])();
+		sock.setOption(SocketOptionLevel.TCP, SocketOption.TCP_NODELAY, true);
+		output = appender!(char[])();
 	}
 
 	void respondWith(const(char)[] range, int status, HttpHeader[] headers) {
-		buf.clear();
-		buf.formattedWrite("HTTP/1.1 %d OK\r\n", status);
+		output.formattedWrite("HTTP/1.1 %d OK\r\n", status);
 		foreach (header; headers)
 		{
-			buf.formattedWrite("%s: %s\r\n", header.key, header.value);
+			output.formattedWrite("%s: %s\r\n", header.key, header.value);
 		}
-		buf ~= "Server: photon-http\r\n";
+		output ~= "Server: photon-http\r\n";
 		auto t = atomicLoad(httpDate);
-		buf ~= cast(const char[])*t;
+		output ~= cast(const char[])*t;
 		if (connectionClose) {
-			buf ~= "Connection: close\r\n";
+			output ~= "Connection: close\r\n";
 		}
-		buf.formattedWrite("Content-Length: %d\r\n", range.length);
-		buf ~= "\r\n";
-		buf ~= range;
-		sock.send(buf.data);
+		output.formattedWrite("Content-Length: %d\r\n", range.length);
+		output ~= "\r\n";
+		output ~= range;
+		if (output.length > 8096) flush();
 	}
 
 	void respondWith(InputRange!dchar range, int status, HttpHeader[] headers) {
 		char[] buf;
 		foreach (el; range){
-			buf ~= cast(char)el;
+			buf ~= el;
 		}
 		respondWith(buf, status, headers);
+	}
+
+	void flush() {
+		sock.send(output.data);
+		output.clear();
 	}
 
     void handle(HttpRequest req);
@@ -62,19 +67,30 @@ abstract class HttpProcessor {
 	void run() {
 		XBuf buf = XBuf(8096, 1024, &this.read);
 		Parser parser = Parser(move(buf));
+	L_serving:
 		for (;;) {
 			HttpRequest request;
-			int r = parser.parse(request);
-			connectionClose = parser.connectionClose;
-			if (r == 0) break;
-			else if (r < 0) {
-				if (parser.error.ptr) {
-					throw new Exception("Failed during http parsing: %s".format(parser.error));
+			for (;;) {
+				int r = parser.parse(request);
+				if (r == 1) {
+					break;
 				}
-				auto zstr = strerror(errno);
-				throw new Exception("I/O error %s".format(zstr[0..strlen(zstr)]));
+				else if (r == 0) {
+					if (output.length) flush();
+					r = parser.load();
+				}
+				if (r == 0) break L_serving;
+				else if (r < 0) {
+					if (parser.error.ptr) {
+						throw new Exception("Failed during http parsing: %s".format(parser.error));
+					}
+					auto zstr = strerror(errno);
+					throw new Exception("I/O error %s".format(zstr[0..strlen(zstr)]));
+				}
 			}
+			connectionClose = parser.connectionClose;
 			handle(request);
+			parser.reset();
 			if (connectionClose) break;
 		}
 	}

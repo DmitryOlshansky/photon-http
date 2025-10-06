@@ -93,7 +93,7 @@ private:
     return 0;
   }
 
-  void reset() {
+  public void reset() {
     state = 0;
     buf.compact(pos);
     pos = 0;
@@ -106,30 +106,32 @@ private:
     connectionClose = false;
   }
 
+  public int load() {
+      int result = buf.load();
+      if (result == 0 && state != 0) {
+        error = "Unexpected end of input";
+        return -1;
+      }
+      if (result < 0) return result;
+      if (result == 0) return 0;
+      return result;
+  }
+
   public int parse(ref HttpRequest req) {
-    reset();
-    for (;;) {
-      int result = step();
-      if (result == -1) {
-        return result;
-      }
-      else if(result == 0) {
-        result = buf.load();
-        if (result == 0 && state != 0) {
-          error = "Unexpected end of input";
-          return -1;
-        }
-        if (result < 0) return result;
-        if (result == 0) return 0;
-      }
-      else {
-        req.body_ = body_;
-        req.method = method;
-        req.uri = url;
-        req.headers = headers[];
-        req.body_ = body_;
-        return 1;
-      }
+    int result = step();
+    if (result == -1) {
+      return result;
+    }
+    else if(result == 0) {
+      return 0;
+    }
+    else {
+      req.body_ = body_;
+      req.method = method;
+      req.uri = url;
+      req.headers = headers[];
+      req.body_ = body_;
+      return 1;
     }
   }
 
