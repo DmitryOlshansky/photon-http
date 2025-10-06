@@ -112,10 +112,13 @@ private:
     return 0;
   }
 
-  public void reset() {
-    state = 0;
+  public void compact() {
     buf.compact(pos);
     pos = 0;
+  }
+
+  public void reset() {
+    state = 0;
     url = null;
     header = HttpHeader.init;
     headers.clear();
