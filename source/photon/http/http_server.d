@@ -136,7 +136,6 @@ abstract class HttpProcessor {
 					break;
 				}
 				else if (r == 0) {
-					parser.compact();
 					if (output.length) flush();
 					r = parser.load();
 				}
@@ -152,7 +151,10 @@ abstract class HttpProcessor {
 			connectionClose = parser.connectionClose;
 			handle(request);
 			parser.reset();
-			if (connectionClose) break;
+			if (connectionClose) {
+				if (output.length) flush();
+				break;
+			}
 		}
 	}
 }
@@ -371,9 +373,11 @@ unittest
 		t.start();
 		try {
 			foreach(j, tc; series) {
-				pair[0].send(tc.raw);
+				for (size_t k = 0; k < tc.raw.length; k++) {
+					Thread.sleep(1.msecs);
+					pair[0].send(tc.raw[k..k+1]);
+				}
 				size_t resp = pair[0].receive(buf[]);
-				import std.stdio;
 				if (!buf[0..resp].matchFirst(tc.respPat)) {
 					writeln(buf[0..resp]);
 					assert(false, text("test series:", i, "\ntest case ", j, "\n", buf[0..resp]));

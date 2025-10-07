@@ -112,12 +112,9 @@ private:
     return 0;
   }
 
-  public void compact() {
+  public void reset() {
     buf.compact(pos);
     pos = 0;
-  }
-
-  public void reset() {
     state = 0;
     url = null;
     header = HttpHeader.init;
@@ -161,13 +158,13 @@ private:
     size_t p = pos;
     with (HttpState) switch(state) {
       case 0: .. case METHOD:
-        parseHttpMethod(buf, p, state, method);
+        auto r = parseHttpMethod(buf, p, state, method);
         pos = p;
-        if (state < 0) {
+        if (r < 0) {
           error = "Wrong http method";
           return -1;
         }
-        if (state == 0) {
+        if (r == 0) {
           return 0;
         }
         state = HttpState.URL;
@@ -213,27 +210,24 @@ private:
       case HEADER_START:
         auto start = pos;
         p = pos;
+        auto p2 = skipRN(p);
+        if (p2 == 0) return 0;
+        if (p2 != size_t.max) {
+          pos = p2;
+          state = BODY;
+          goto case BODY;
+        }
         while (p < buf.length) {
           if (buf[p] == '-' || buf[p].isAlpha() || buf[p].isDigit())
             p++;
           else if (buf[p] == ':')
             break;
-          else {
-            p = skipRN(p);
-            if (p == 0) return 0;
-            if (p == size_t.max) {
-              error = "Expected \\r\\n terminating headers list";
-              return -1;
-            }
-            pos = p;
-            state = BODY;
-            goto case BODY;
-          }
         }
         if (p == buf.length) return 0;
         header.key = cast(char[])buf[start..p];
         p++;
         pos = p;
+        state = HEADER_VALUE_START;
         goto case HEADER_VALUE_START;
       case HEADER_VALUE_START:
         p = skipWs(pos);
@@ -255,7 +249,6 @@ private:
             headers ~= header;
             state = HEADER_START;
             pos = p;
-            import std.uni;
             if (caselessEqual(header.key, "CONTENT-LENGTH")) {
               import std.conv;
               length = header.value.to!int;
