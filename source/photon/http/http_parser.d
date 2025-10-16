@@ -62,6 +62,36 @@ bool caselessEqual(const(char)[] a, const(char)[] b) {
     return true;
 }
 
+immutable bool[256] isURL = () {
+  bool[256] table;
+  foreach (ch; 0..128) {
+      table[ch] = ch == '/' || ch == '-' || ch == '%' || ch == '.' || ch == '_' || 
+      ch == '~' || ch == '?' || ch == '&' || ch == '=' || ch == ':' ||
+      ch == '#' || ch == '+' || ch.isAlpha() || ch.isDigit();
+  }
+  return table;
+}();
+
+immutable bool[256] isVersion = () {
+  bool[256] table;
+  foreach (ch; 0..128) {
+    table[ch] = ch == '.' || ch == '/' || ch.isAlpha() || ch.isDigit();
+  }
+  return table;
+}();
+
+immutable bool[256] isHeader = () {
+  bool[256] table;
+  foreach (ch; 0..128) {
+    table[ch] = ch == '-' || ch.isAlpha() || ch.isDigit();
+  }
+  return table;
+}();
+
+bool isSpace(char c) {
+  return c == ' ' || (c >= 0x09 && c <= 0x0D);
+}
+
 struct Parser {
 private:
   XBuf buf;
@@ -70,7 +100,7 @@ private:
   HttpMethod method;
   char[] url;
   int length;
-  Appender!(HttpHeader[]) headers;
+  Buffer!(HttpHeader) headers;
   HttpHeader header;
   char[] version_;
   ubyte[] body_;
@@ -80,10 +110,11 @@ private:
   public this(XBuf buf) {
     import std.algorithm.mutation;
     this.buf = move(buf);
+    headers = Buffer!(HttpHeader)(16);
   }
 
   size_t skipWs(size_t p) {
-    while (p < buf.length && buf[p].isWhite()) p++;
+    while (p < buf.length && isSpace(buf[p])) p++;
     return p;
   }
 
@@ -103,7 +134,7 @@ private:
       else if(buf[p] == '\n') {
         return p + 1;
       }
-      else if(buf[p].isWhite()) {
+      else if(isSpace(buf[p])) {
         p++;
       } else {
         return size_t.max;
@@ -148,7 +179,7 @@ private:
       req.body_ = body_;
       req.method = method;
       req.uri = url;
-      req.headers = headers[];
+      req.headers = headers.data;
       req.body_ = body_;
       return 1;
     }
@@ -173,9 +204,7 @@ private:
         p = skipWs(pos);
         auto start = p;
         while (p < buf.length) {
-          if (buf[p] == '/' || buf[p] == '-' || buf[p] == '%' || buf[p] == '.' || buf[p] == '_' || 
-              buf[p] == '~' || buf[p] == '?' || buf[p] == '&' || buf[p] == '=' || buf[p] == ':' ||
-              buf[p] == '#' || buf[p] == '+' || buf[p].isAlpha() || buf[p].isDigit())
+          if (isURL[buf[p]])
             p++;
           else
             break;
@@ -191,7 +220,7 @@ private:
         p = skipWs(pos);
         auto start = p;
         while (p < buf.length) {
-          if (buf[p] == '.' || buf[p] == '/' || buf[p].isAlpha() || buf[p].isDigit())
+          if (isVersion[buf[p]])
             p++;
           else
             break;
@@ -218,7 +247,7 @@ private:
           goto case BODY;
         }
         while (p < buf.length) {
-          if (buf[p] == '-' || buf[p].isAlpha() || buf[p].isDigit())
+          if (isHeader[buf[p]])
             p++;
           else if (buf[p] == ':')
             break;
@@ -246,7 +275,7 @@ private:
               return -1;
             }
             header.value = cast(char[])buf[start..end];
-            headers ~= header;
+            headers.put(header);
             state = HEADER_START;
             pos = p;
             if (caselessEqual(header.key, "CONTENT-LENGTH")) {
