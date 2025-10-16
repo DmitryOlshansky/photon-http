@@ -23,49 +23,9 @@ void putInt(Output)(ref Output sink, long value) {
 	sink.put(buf[i..$]);
 }
 
-struct Buffer {
-	char* mem;
-	size_t cap;
-	size_t offset;
-
-	this(size_t initial) {
-		mem = cast(char*)malloc(initial);
-		cap = initial;
-	}
-
-	void put(const(char)[] slice) {
-		this ~= slice;
-	}
-
-	ref opOpAssign(string op:"~")(const(char)[] slice) {
-		if (offset + slice.length > cap) {
-			cap =  max(cap * 2, offset + slice.length);
-			mem = cast(char*) realloc(mem, cap);
-		}
-		memmove(mem + offset, slice.ptr, slice.length);
-		offset += slice.length;
-	}
-
-	void clear() {
-		offset = 0;
-	}
-
-	size_t length() { return offset; }
-
-	char[] data() {
-		return mem[0..offset];
-	}
-
-	@disable this(this);
-
-	~this() {
-		free(mem);
-	}
-}
-
 abstract class HttpProcessor {
 	Socket sock;
-	Buffer output;
+	Buffer!char output;
 	bool connectionClose;
     
 	this(Socket sock) {
@@ -73,7 +33,7 @@ abstract class HttpProcessor {
 		try {
 			sock.setOption(SocketOptionLevel.TCP, SocketOption.TCP_NODELAY, true);
 		} catch(Exception e) { } // not tcp socket
-		output = Buffer(256);
+		output = Buffer!char(256);
 	}
 
 	void respondWith(const(char)[] range, int status, HttpHeader[] headers) {
