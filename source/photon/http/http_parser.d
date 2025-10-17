@@ -95,16 +95,17 @@ bool isSpace(char c) {
 struct Parser {
 private:
   XBuf buf;
+  size_t begin;
   size_t pos;
   int state;
   HttpMethod method;
   char[] url;
   int length;
+  public bool connectionClose;
   Buffer!(HttpHeader) headers;
   HttpHeader header;
   char[] version_;
   ubyte[] body_;
-  public bool connectionClose;
   public string error;
   
   public this(XBuf buf) {
@@ -143,9 +144,28 @@ private:
     return 0;
   }
 
+  private static void shift(ref inout(char)[] array, size_t offs) {
+    array = array.ptr[-offs..array.length-offs];
+  }
+
+  public void compact() {
+    if (begin > 0) {
+      buf.compact(begin);
+      foreach (ref h; headers.data) {
+        shift(h.key, begin);
+        shift(h.value, begin);
+      }
+      shift(header.key, begin);
+      shift(header.value, begin);
+      shift(url, begin);
+      shift(version_, begin);
+      pos -= begin;
+      begin = 0;
+    }
+  }
+
   public void reset() {
-    buf.compact(pos);
-    pos = 0;
+    begin = pos;
     state = 0;
     url = null;
     header = HttpHeader.init;

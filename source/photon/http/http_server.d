@@ -97,6 +97,7 @@ abstract class HttpProcessor {
 				}
 				else if (r == 0) {
 					if (output.length) flush();
+					parser.compact();
 					r = parser.load();
 				}
 				if (r == 0) break L_serving;
@@ -307,46 +308,71 @@ unittest
          	TestCase("GET /test3 HTTP/1.1\r\n" ~
 	         "Host: host2\r\n" ~
 	         "Accept: */*\r\n" ~
+			 "X-api-key: " ~ 'x'.repeat(1000).array.idup ~ "\r\n" ~
 	         "Content-Length: 7\r\n" ~
 	         "\r\nGOODBAY",
 	         HttpMethod.GET,
 	         "GOODBAY",
-	         [ HttpHeader("Host", "host2"), HttpHeader("Accept", "*/*"), HttpHeader("Content-Length", "7")],
+	         [ HttpHeader("Host", "host2"), HttpHeader("Accept", "*/*"), HttpHeader("X-api-key", 'x'.repeat(1000).array), HttpHeader("Content-Length", "7")],
 	         `HTTP/1.1 200 OK\r\nServer: photon-http\r\nDate: .* GMT\r\nContent-Length: 7\r\n\r\nGOODBAY`
          	)
 		]
 	];
 
-	foreach (i, series; groups) {
-		Socket[2] pair = socketPair();
-		char[1024] buf;
-		auto serv = new TestHttpProcessor(pair[1], series);
-		auto t = new Thread({
+	void testGroup(void delegate(size_t, TestCase[], Socket) dg) {
+		foreach (i, series; groups) {
+			Socket[2] pair = socketPair();
+			auto serv = new TestHttpProcessor(pair[1], series);
+			auto t = new Thread({
+				try {
+					serv.run();
+				} 
+				catch(Throwable t) {
+					stderr.writeln("Server failed: ", t);
+					throw t;
+				}
+			});
+			t.start();
 			try {
-				serv.run();
-			} 
-			catch(Throwable t) {
-				stderr.writeln("Server failed: ", t);
-				throw t;
+				dg(i, series, pair[0]);
+			} finally { 
+				pair[0].close();
+				t.join();
 			}
-		});
-		t.start();
-		try {
-			foreach(j, tc; series) {
-				for (size_t k = 0; k < tc.raw.length; k++) {
-					Thread.sleep(1.msecs);
-					pair[0].send(tc.raw[k..k+1]);
-				}
-				size_t resp = pair[0].receive(buf[]);
-				if (!buf[0..resp].matchFirst(tc.respPat)) {
-					writeln(buf[0..resp]);
-					assert(false, text("test series:", i, "\ntest case ", j, "\n", buf[0..resp]));
-				}
-				
-			}
-		} finally { 
-			pair[0].close();
-			t.join();
 		}
 	}
+	
+	testGroup((size_t i, TestCase[] series, Socket sock) {
+		char[1024] buf;
+		foreach(j, tc; series) {
+			for (size_t k = 0; k < tc.raw.length; k++) {
+				Thread.sleep(1.msecs);
+				sock.send(tc.raw[k..k+1]);
+			}
+			size_t resp = sock.receive(buf[]);
+			if (!buf[0..resp].matchFirst(tc.respPat)) {
+				writeln(buf[0..resp]);
+				assert(false, text("test series:", i, "\ntest case ", j, "\n", buf[0..resp]));
+			}
+		}
+	});
+
+	testGroup((size_t i, TestCase[] series, Socket sock) {
+		char[1024] buf;
+		char[] reqs = reduce!((acc, t) => acc ~ t.raw)(new char[0], series);
+		sock.send(reqs[0..min(100, $)]);
+		Thread.sleep(100.msecs);
+		sock.send(reqs[min(100, $)..$]);
+		Thread.sleep(100.msecs);
+		size_t resp = sock.receive(buf[]);
+		size_t ofs = 0;
+		foreach (j, tc; series) {
+			auto m = buf[ofs..resp].matchFirst(tc.respPat);
+			if (!m) {
+				writeln(buf[0..resp]);
+				assert(false, text("test series:", i, "\ntest case ", j, "\n", buf[0..resp]));
+			}
+			ofs = m.hit.ptr + m.hit.length - buf.ptr;
+		}
+	});
 }
