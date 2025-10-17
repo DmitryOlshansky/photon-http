@@ -12,6 +12,8 @@ import core.thread, core.atomic, core.time;
 import photon.http.state_machine, photon.http.http_parser;
 import glow.xbuf;
 
+private:
+
 void putInt(Output)(ref Output sink, long value) {
 	immutable table = "0123456789";
 	char[16] buf=void;
@@ -23,7 +25,71 @@ void putInt(Output)(ref Output sink, long value) {
 	sink.put(buf[i..$]);
 }
 
-abstract class HttpProcessor {
+public enum HttpStatus : int {
+	Continue = 100,
+	SwitchingProtocols = 101,
+	Processing = 102,
+	EarlyHints = 103,
+	OK = 200,
+	Created = 201,
+	Accepted = 202,
+	NonAuthoritativeInformation = 203,
+	NoContent = 204,
+	ResetContent = 205,
+	PartialContent = 206,
+	MultiStatus = 207,
+	AlreadyReported = 208,
+	MultipleChoices = 300,
+	MovedPermanently = 301,
+	Found = 302,
+	SeeOther = 303,
+	NotModified = 304,
+	TemporaryRedirect = 307,
+	PermanentRedirect = 308,
+	BadRequest = 400,
+	Unathorized = 401,
+	PaymentRequried = 402,
+	Forbidden = 403,
+	NotFound = 404,
+	MethodNotAllowed = 405,
+	NotAcceptable = 406,
+	ProxyAutherticationRequried = 407,
+	RequestTimeout = 408,
+	Conflict = 409,
+	Gone = 410,
+	LengthRequired = 411,
+	PreconditionFailed = 412,
+	ContentTooLarge = 413,
+	UriTooLong = 414,
+	UnsupportedMediaType = 415,
+	RangeNotSatisfiable = 416,
+	ExpectationFailed = 417,
+	ImATeapot = 418,
+	MisdirectedRequest = 421,
+	Locked = 423,
+	FailedDependency = 424,
+	TooEarly = 425,
+	UpgradeRequired = 426,
+	PreconditionRequired = 428,
+	TooManyRequests = 429,
+	RequestHeaderFieldsTooLarge = 431,
+	UnavailableForLegalReasons = 451,
+	InternalServerError = 500,
+	NotImplemented = 501,
+	BadGateway = 502,
+	ServiceUnavailable = 503,
+	GatewayTimeout = 504,
+	HttpVersionNotSupported = 505,
+	VariantAlsoNegotiates = 506,
+	InsufficientStorage = 507,
+	LoopDetected = 508,
+	NotExtended = 510,
+	NetworkAuthenticationRequired = 511
+}
+
+immutable string[int] statusMessages;
+
+public abstract class HttpProcessor {
 	Socket sock;
 	Buffer!char output;
 	bool connectionClose;
@@ -38,8 +104,17 @@ abstract class HttpProcessor {
 
 	void respondWith(const(char)[] range, int status, HttpHeader[] headers) {
 		output ~= "HTTP/1.1 ";
-		putInt(output, status);
-		output ~= " OK\r\n";
+		auto p = status in statusMessages;
+		string statusMessage = "Internal Server Error";
+		if (p) {
+			statusMessage = *p;
+		} else {
+			status = 500;
+		}
+		putInt(output, status);		
+		output ~= " ";
+		output ~= statusMessage;
+		output ~= "\r\n";
 		foreach (header; headers)
 		{
 			output ~= header.key;
@@ -123,6 +198,67 @@ abstract class HttpProcessor {
 shared const(char)[]* httpDate;
 
 shared static this(){
+	with(HttpStatus) {
+		statusMessages[Continue] = "Continue";
+		statusMessages[SwitchingProtocols] = "Switching Protocols";
+		statusMessages[Processing] = "Processing";
+		statusMessages[EarlyHints] = "Early Hints";
+		statusMessages[OK] = "OK";
+		statusMessages[Created] = "Created";
+		statusMessages[Accepted] = "Accepted";
+		statusMessages[NonAuthoritativeInformation] = "Non-Authoritative Information";
+		statusMessages[NoContent] = "No Content";
+		statusMessages[ResetContent] = "Reset Content";
+		statusMessages[PartialContent] = "Partial Content";
+		statusMessages[MultiStatus] = "Multi-Status";
+		statusMessages[AlreadyReported] = "Already Reported";
+		statusMessages[MultipleChoices] = "Multiple Choices";
+		statusMessages[MovedPermanently] = "Moved Permanently";
+		statusMessages[Found] = "Found";
+		statusMessages[SeeOther] = "See Other";
+		statusMessages[NotModified] = "Not Modified";
+		statusMessages[TemporaryRedirect] = "Temporary Redirect";
+		statusMessages[PermanentRedirect] = "Permanent Redirect";
+		statusMessages[BadRequest] = "Bad Request";
+		statusMessages[Unathorized] = "Unathorized";
+		statusMessages[PaymentRequried] = "Payment Requried";
+		statusMessages[Forbidden] = "Forbidden";
+		statusMessages[NotFound] = "Not Found";
+		statusMessages[MethodNotAllowed] = "Method Not Allowed";
+		statusMessages[NotAcceptable] = "Not Acceptable";
+		statusMessages[ProxyAutherticationRequried] = "Proxy Authertication Requried";
+		statusMessages[RequestTimeout] = "Request Timeout";
+		statusMessages[Conflict] = "Conflict";
+		statusMessages[Gone] = "Gone";
+		statusMessages[LengthRequired] = "Length Required";
+		statusMessages[PreconditionFailed] = "Precondition Failed";
+		statusMessages[ContentTooLarge] = "Content Too Large";
+		statusMessages[UriTooLong] = "URI Too Long";
+		statusMessages[UnsupportedMediaType] = "Unsupported Media Type";
+		statusMessages[RangeNotSatisfiable] = "Range Not Satisfiable";
+		statusMessages[ExpectationFailed] = "Expectation Failed";
+		statusMessages[ImATeapot] = "I'm a teapot";
+		statusMessages[MisdirectedRequest] = "Misdirected Request";
+		statusMessages[Locked] = "Locked";
+		statusMessages[FailedDependency] = "Failed Dependency";
+		statusMessages[TooEarly] = "Too Early";
+		statusMessages[UpgradeRequired] = "Upgrade Required";
+		statusMessages[PreconditionRequired] = "Precondition Required";
+		statusMessages[TooManyRequests] = "Too Many Requests";
+		statusMessages[RequestHeaderFieldsTooLarge] = "Request Header Fields Too Large";
+		statusMessages[UnavailableForLegalReasons] = "Unavailable For Legal Reasons";
+		statusMessages[InternalServerError] = "Internal Server Error";
+		statusMessages[NotImplemented] = "Not Implemented";
+		statusMessages[BadGateway] = "Bad Gateway";
+		statusMessages[ServiceUnavailable] = "Service Unavailable";
+		statusMessages[GatewayTimeout] = "Gateway Timeout";
+		statusMessages[HttpVersionNotSupported] = "Http Version Not Supported";
+		statusMessages[VariantAlsoNegotiates] = "Variant Also Negotiates";
+		statusMessages[InsufficientStorage] = "Insufficient Storage";
+		statusMessages[LoopDetected] = "Loop Detected";
+		statusMessages[NotExtended] = "Not Extended";
+		statusMessages[NetworkAuthenticationRequired] = "Network Authentication Required";
+	}
 	Thread httpDateThread;
     Appender!(char[])[3] bufs;
     const(char)[][3] targets;
