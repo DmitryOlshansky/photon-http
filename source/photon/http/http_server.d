@@ -87,7 +87,7 @@ public enum HttpStatus : int {
 	NetworkAuthenticationRequired = 511
 }
 
-immutable string[int] statusMessages;
+immutable string[600] statusMessages;
 
 public abstract class HttpProcessor {
 	Socket sock;
@@ -104,13 +104,7 @@ public abstract class HttpProcessor {
 
 	void respondWith(const(char)[] range, int status, HttpHeader[] headers) {
 		output ~= "HTTP/1.1 ";
-		auto p = status in statusMessages;
-		string statusMessage = "Internal Server Error";
-		if (p) {
-			statusMessage = *p;
-		} else {
-			status = 500;
-		}
+		auto statusMessage = statusMessages[status];
 		putInt(output, status);		
 		output ~= " ";
 		output ~= statusMessage;
@@ -197,7 +191,8 @@ public abstract class HttpProcessor {
 
 shared const(char)[]* httpDate;
 
-shared static this(){
+shared static this() {
+	statusMessages[] = "Unknown";
 	with(HttpStatus) {
 		statusMessages[Continue] = "Continue";
 		statusMessages[SwitchingProtocols] = "Switching Protocols";
