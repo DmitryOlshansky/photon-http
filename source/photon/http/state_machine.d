@@ -147,10 +147,10 @@ void genCodeForState(T)(TrieEntry!T* node, ref Builder builder) {
         builder.put(`return 0;`);
         builder.decIndent();
         builder.put(`}`);
-        builder.put(`switch(buf[p]) {`);
+        builder.put(`switch(buf[p] & ~32) {`);
         foreach (idx, n; node.next){
             if (n !is null) {
-                builder.put(`case '%s','%s':`.format(toLower(cast(char)idx), toUpper(cast(char)idx)));
+                builder.put(`case '%s':`.format(toUpper(cast(char)idx)));
                 builder.incIndent();
                 builder.put(`p++;`);
                 builder.put(`s = %s;`.format(n.id));
@@ -208,4 +208,5 @@ auto generateStateMachine(alias enumeration)(string functionName) {
 }
 
 enum m = generateStateMachine!HttpMethod("parseHttpMethod");
+//pragma(msg, m);
 mixin(m);
