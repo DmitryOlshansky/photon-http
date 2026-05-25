@@ -440,12 +440,12 @@ unittest
 	         "Host: host2\r\n" ~
 	         "Accept: */*\r\n" ~
 			 "X-api-key: " ~ 'x'.repeat(1000).array.idup ~ "\r\n" ~
-	         "Content-Length: 7\r\n" ~
-	         "\r\nGOODBAY",
+	         "Content-Length: 10000\r\n" ~
+	         "\r\n" ~ 'X'.repeat(10_000).array.idup,
 	         HttpMethod.GET,
-	         "GOODBAY",
-	         [ HttpHeader("Host", "host2"), HttpHeader("Accept", "*/*"), HttpHeader("X-api-key", 'x'.repeat(1000).array), HttpHeader("Content-Length", "7")],
-	         `HTTP/1.1 200 OK\r\nServer: photon-http\r\nDate: .* GMT\r\nContent-Length: 7\r\n\r\nGOODBAY`
+	         'X'.repeat(10_000).array.idup,
+	         [ HttpHeader("Host", "host2"), HttpHeader("Accept", "*/*"), HttpHeader("X-api-key", 'x'.repeat(1000).array), HttpHeader("Content-Length", "10000")],
+	         `HTTP/1.1 200 OK\r\nServer: photon-http\r\nDate: .* GMT\r\nContent-Length: 10000\r\n\r\n`~'X'.repeat(10_000).array.idup
          	)
 		]
 	];
@@ -474,11 +474,18 @@ unittest
 	}
 	
 	testGroup((size_t i, TestCase[] series, Socket sock) {
-		char[1024] buf;
+		char[] buf = new char[1024_000];
 		foreach(j, tc; series) {
-			for (size_t k = 0; k < tc.raw.length; k++) {
-				Thread.sleep(1.msecs);
-				sock.send(tc.raw[k..k+1]);
+			if (tc.raw.length < 1000) {
+				for (size_t k = 0; k < tc.raw.length; k++) {
+					Thread.sleep(1.msecs);
+					sock.send(tc.raw[k..k+1]);
+				}
+			} else {
+				for (size_t k = 0; k < tc.raw.length; k += 1000) {
+					Thread.sleep(1.msecs);
+					sock.send(tc.raw[k..min(k+1000, tc.raw.length)]);
+				}
 			}
 			size_t resp = sock.receive(buf[]);
 			if (!buf[0..resp].matchFirst(tc.respPat)) {
@@ -489,7 +496,7 @@ unittest
 	});
 
 	testGroup((size_t i, TestCase[] series, Socket sock) {
-		char[1024] buf;
+		char[] buf = new char[1024_000];
 		char[] reqs = reduce!((acc, t) => acc ~ t.raw)(new char[0], series);
 		sock.send(reqs[0..min(100, $)]);
 		Thread.sleep(100.msecs);

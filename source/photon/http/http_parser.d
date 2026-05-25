@@ -92,6 +92,22 @@ bool isSpace(char c) {
   return c == ' ' || (c >= 0x09 && c <= 0x0D);
 }
 
+struct Slice {
+  size_t start, end;
+
+  const(char)[] instantiate(ref XBuf buf) {
+    return cast(const(char)[])buf[start..end];
+  }
+}
+
+struct HttpHeaderSlice {
+  Slice key, value;
+
+  HttpHeader instantiate(ref XBuf buf) {
+    return HttpHeader(key.instantiate(buf), value.instantiate(buf));
+  }
+}
+
 struct Parser {
 private:
   XBuf buf;
@@ -99,19 +115,21 @@ private:
   size_t pos;
   int state;
   HttpMethod method;
-  char[] url;
+  Slice url;
   int length;
   public bool connectionClose;
-  Buffer!(HttpHeader) headers;
-  HttpHeader header;
-  char[] version_;
-  ubyte[] body_;
+  Buffer!(HttpHeaderSlice) headers;
+  Buffer!(HttpHeader) parsedHeaders;
+  HttpHeaderSlice header;
+  Slice version_;
+  Slice body_;
   public string error;
   
   public this(XBuf buf) {
     import std.algorithm.mutation;
     this.buf = move(buf);
-    headers = Buffer!(HttpHeader)(16);
+    headers = Buffer!(HttpHeaderSlice)(16);
+    parsedHeaders = Buffer!(HttpHeader)(16);
   }
 
   size_t skipWs(size_t p) {
@@ -144,8 +162,9 @@ private:
     return 0;
   }
 
-  private static void shift(ref inout(char)[] array, size_t offs) {
-    array = array.ptr[-offs..array.length-offs];
+  private static void shift(ref Slice slice, size_t offs) {
+    slice.start -= offs;
+    slice.end -= offs;
   }
 
   public void compact() {
@@ -167,11 +186,12 @@ private:
   public void reset() {
     begin = pos;
     state = 0;
-    url = null;
-    header = HttpHeader.init;
+    url = Slice(0, 0);
+    header = HttpHeaderSlice.init;
     headers.clear();
+    parsedHeaders.clear();
     method = HttpMethod.init;
-    version_ = null;
+    version_ = Slice(0, 0);
     error = null;
     connectionClose = false;
   }
@@ -196,11 +216,14 @@ private:
       return 0;
     }
     else {
-      req.body_ = body_;
+      req.body_ = cast(ubyte[])body_.instantiate(buf);
+      req.version_ = version_.instantiate(buf);
       req.method = method;
-      req.uri = url;
-      req.headers = headers.data;
-      req.body_ = body_;
+      req.uri = url.instantiate(buf);
+      foreach (h; headers.data) {
+        parsedHeaders.put(h.instantiate(buf));
+      }
+      req.headers = parsedHeaders.data;
       return 1;
     }
   }
@@ -233,7 +256,8 @@ private:
           return 0;
         }
         pos = p;
-        url = cast(char[])buf[start..pos];
+        url.start = start;
+        url.end = p;
         state = VERSION;
         goto case VERSION;
       case VERSION:
@@ -253,7 +277,8 @@ private:
           return -1;
         }
         pos = p;
-        version_ = cast(char[])buf[start..pos];
+        version_ .start = start;
+        version_.end = p;
         state = HEADER_START;
         goto case HEADER_START;
       case HEADER_START:
@@ -273,7 +298,8 @@ private:
             break;
         }
         if (p == buf.length) return 0;
-        header.key = cast(char[])buf[start..p];
+        header.key.start = start;
+        header.key.end = p;
         p++;
         pos = p;
         state = HEADER_VALUE_START;
@@ -294,16 +320,19 @@ private:
               error = "Expected \\r\\n terminating header value";
               return -1;
             }
-            header.value = cast(char[])buf[start..end];
+            header.value.start = start;
+            header.value.end = end;
             headers.put(header);
             state = HEADER_START;
             pos = p;
-            if (caselessEqual(header.key, "CONTENT-LENGTH")) {
+            auto hk = header.key.instantiate(buf);
+            auto hv = header.value.instantiate(buf);
+            if (caselessEqual(hk, "CONTENT-LENGTH")) {
               import std.conv;
-              length = header.value.to!int;
+              length = hv.to!int;
             }
-            else if(caselessEqual(header.key, "CONNECTION")) {
-              if (caselessEqual(header.value, "CLOSE")) {
+            else if(caselessEqual(hk, "CONNECTION")) {
+              if (caselessEqual(hv, "CLOSE")) {
                 connectionClose = true;
               }
             }
@@ -313,7 +342,8 @@ private:
         return 0;
       case BODY:
         if (buf.length - pos >= length) {
-          body_ = buf[pos..pos+length];
+          body_.start = pos;
+          body_.end = pos + length;
           pos = pos + length;
           state = END;
           goto case END;
